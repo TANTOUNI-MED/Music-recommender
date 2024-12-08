@@ -13,6 +13,11 @@ filename_to_index = pickle.load(open("filename_to_index.pkl", "rb"))
 index_to_filename = pickle.load(open("index_to_filename.pkl", "rb"))
 best_model = load_model("best_model.h5")
 
+
+# @app.route('/')
+# def home():
+#     return render_template('home.html')
+
 MUSIC_DIR = "categories"
 
 @app.route('/')
