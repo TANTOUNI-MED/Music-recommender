@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Music Player</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .music-container {
+            max-width: 400px;
+            margin: 50px auto;
+            text-align: center;
+        }
+        #recommendations {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="music-container">
+            <h2 id="current-song">{{ song }}</h2>
+            <audio id="music-player" controls style="width:100%"></audio>
+            
+            <div id="recommendations" class="mt-4">
+                <h3>Recommendations</h3>
+                <ul id="recommendation-list" class="list-group"></ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const musicPlayer = document.getElementById('music-player');
+        const currentSongTitle = document.getElementById('current-song');
+        const recommendationList = document.getElementById('recommendation-list');
+
+        const category = "{{ category }}";
+        const currentSong = "{{ song }}";
+
+        // Set initial song
+        musicPlayer.src = `/categories/${category}/${currentSong}`;
+        musicPlayer.play();
+
+        // Get initial recommendations
+        fetch('/recommend', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                filename: currentSong,
+                num_recommendations: 5
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            recommendationList.innerHTML = ''; // Clear previous recommendations
+            data.recommendations.forEach(rec => {
+                const li = document.createElement('li');
+                li.className = 'list-group-item';
+                li.textContent = rec;
+                li.onclick = () => {
+                    // Redirect to player with new song
+                    window.location.href = `/player?category=${category}&song=${rec}`;
+                };
+                recommendationList.appendChild(li);
+            });
+        })
+        .catch(error => console.error('Error:', error));
+    </script>
+</body>
+</html>
