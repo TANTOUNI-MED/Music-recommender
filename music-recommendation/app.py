@@ -6,10 +6,140 @@ import hashlib
 from flask import Flask, request, jsonify, render_template, send_from_directory, redirect, url_for, session, flash
 from keras.models import load_model
 from sklearn.metrics.pairwise import cosine_similarity
-from keras.models import load_model
+import numpy as np
+import pandas as pd
+import tensorflow as tf
+graph = tf.compat.v1.get_default_graph()
+
+print(tf.__version__)
+
+from sklearn.preprocessing import StandardScaler
+from tensorflow.keras.layers import Input, Dense, Dropout, BatchNormalization
+from tensorflow.keras.models import Model
+from tensorflow.keras.regularizers import l2
+
+
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key_here'  
+
+# Music Directory
+MUSIC_DIR = "categories"
+
+# Recommendation System Classes and Functions
+class SingleUserRecommender:
+    def __init__(self, num_items, encoding_dim=50):
+        self.num_items = num_items
+        self.encoding_dim = encoding_dim
+        self.encoder = self._build_encoder()
+    
+    def _build_encoder(self):
+        input_layer = Input(shape=(self.num_items,))
+        
+        # Encoder layers
+        encoded = Dense(self.encoding_dim * 2, 
+                       activation='relu', 
+                       kernel_regularizer=l2(0.001))(input_layer)
+        encoded = BatchNormalization()(encoded)
+        encoded = Dropout(0.5)(encoded)
+        
+        encoded = Dense(self.encoding_dim, 
+                       activation='relu', 
+                       kernel_regularizer=l2(0.001))(encoded)
+        encoded = BatchNormalization()(encoded)
+        
+        # Create encoder model
+        encoder = Model(input_layer, encoded)
+        
+        return encoder
+    
+    def get_recommendations(self, user_interactions, item_names, top_k=10):
+        """
+        Get recommendations for a single user.
+        """
+        # Ensure interactions are numpy array and binary
+        user_interactions = np.array(user_interactions).astype(int)
+        
+        # Scale interactions
+        scaler = StandardScaler()
+        scaled_interactions = scaler.fit_transform(user_interactions.reshape(1, -1))
+        
+        # Get user embedding
+        user_embedding = self.encoder.predict(scaled_interactions)[0]
+        
+        # Get item embeddings
+        item_embeddings = self.encoder.predict(np.eye(self.num_items))
+        
+        # Compute cosine similarity
+        scores = cosine_similarity(user_embedding.reshape(1, -1), item_embeddings)[0]
+        
+        # Remove already interacted items
+        scores[user_interactions == 1] = -np.inf
+        
+        # Get top K recommendations (item indices)
+        top_item_indices = scores.argsort()[-top_k:][::-1]
+        
+        # Convert to recommended item names
+        recommended_items = [item_names[idx] for idx in top_item_indices]
+        
+        return recommended_items
+
+def train_recommender(interactions, item_names):
+    """
+    Train a recommender model.
+    """
+    # Convert interactions to binary matrix
+    interaction_matrix = (interactions.values > 0).astype(int)
+    
+    # Create recommender
+    recommender = SingleUserRecommender(
+        num_items=interaction_matrix.shape[1],
+        encoding_dim=min(50, interaction_matrix.shape[1] // 2)
+    )
+    
+    return recommender
+
+def get_user_recommendations(df, user_id, top_k=10):
+    """
+    Get recommendations for a specific user.
+    """
+    # Validate user_id
+    if 'user_id' not in df.columns:
+        raise ValueError("DataFrame must contain a 'user_id' column")
+
+    # Prepare data
+    item_columns = [col for col in df.columns if col != 'user_id']
+    item_names = item_columns
+
+    # Check if user exists
+    user_row = df[df['user_id'] == user_id]
+    if user_row.empty:
+        print(f"No interaction data found for user {user_id}")
+        return []
+
+    # Get user interactions
+    user_interactions = user_row[item_columns].values[0]
+
+    # Check if user has any interactions
+    if user_interactions.sum() == 0:
+        print(f"User {user_id} has no interaction history")
+        return []
+
+    # Train recommender
+    recommender = train_recommender(df[item_columns], item_names)
+
+    # Get recommendations
+    try:
+        recommendations = recommender.get_recommendations(
+            user_interactions, 
+            item_names, 
+            top_k=top_k
+        )
+        print('recommendations : ',recommendations)
+        return recommendations
+    except Exception as e:
+        print(f"Error generating recommendations: {e}")
+        return []
 
 # Load saved data and model
 similarity_matrix = pickle.load(open("similarity_matrix.pkl", "rb"))
@@ -21,12 +151,6 @@ best_model = load_model("best_model.h5")
 users_df = pd.read_csv("users.csv")
 interactions_df = pd.read_csv("user_song_table.csv")
 
-# @app.route('/')
-# def home():
-#     return render_template('home.html')
-
-MUSIC_DIR = "categories"
-
 # Login route
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -34,13 +158,8 @@ def login():
         username = request.form['username']
         password = request.form['password']
 
-        print('username :',username)
-        print('password :',password)
-        
         # Check credentials
         user = users_df[(users_df['name'] == username) & (users_df['password'] == password)]
-        print('user :',user)
-
         
         if not user.empty:
             # Store user ID in session
@@ -60,25 +179,37 @@ def logout():
     flash('You have been logged out', 'success')
     return redirect(url_for('login'))
 
+# Main index route
 @app.route('/')
 def index():
-
     # Get the list of categories
-    categories = [folder for folder in os.listdir(MUSIC_DIR) if os.path.isdir(os.path.join(MUSIC_DIR, folder))]
-    
-    # Get collaborative filtering recommendations for the logged-in user
-    try:
-        user_recommendations = get_user_recommendations(interactions_df, session['user_id'], top_k=10)
-    except Exception as e:
-        print(f"Error getting recommendations: {e}")
-        user_recommendations = []
-    
-    return render_template('home.html', 
-                           categories=categories, 
-                           username=session.get('username'),
-                           recommendations=user_recommendations)
+    categories = [
+        folder for folder in os.listdir(MUSIC_DIR)
+        if os.path.isdir(os.path.join(MUSIC_DIR, folder))
+    ]
 
-# Rest of the routes remain the same as in the previous implementation
+    # Initialize user recommendations as empty
+    user_recommendations = []
+
+    # Check if the user is logged in and fetch recommendations if they are
+    if 'user_id' in session:
+        try:
+            user_recommendations = get_user_recommendations(
+                interactions_df, session['user_id'], top_k=10
+            )
+        except Exception as e:
+            print(f"Error getting recommendations: {e}")
+            # `user_recommendations` remains an empty list if an error occurs
+
+    return render_template(
+        'home.html',
+        categories=categories,
+        username=session.get('username'),  # Pass the username if logged in
+        recommendations=user_recommendations  # Pass recommendations if available
+    )
+
+
+# Get music for a specific category
 @app.route('/get_music/<category>')
 def get_music(category):
     # Get the list of music files in the selected category
@@ -98,6 +229,7 @@ def player():
 def serve_music(category, filename):
     return send_from_directory(os.path.join(MUSIC_DIR, category), filename)
 
+# Recommendation endpoint
 @app.route('/recommend', methods=['POST'])
 def recommend():
     data = request.json
