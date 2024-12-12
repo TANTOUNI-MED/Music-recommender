@@ -1,11 +1,15 @@
-from flask import Flask, request, jsonify, render_template, send_from_directory
 import os
 import pickle
 import numpy as np
+import pandas as pd
+import hashlib
+from flask import Flask, request, jsonify, render_template, send_from_directory, redirect, url_for, session, flash
+from keras.models import load_model
 from sklearn.metrics.pairwise import cosine_similarity
 from keras.models import load_model
 
 app = Flask(__name__)
+app.secret_key = 'your_secret_key_here'  
 
 # Load saved data and model
 similarity_matrix = pickle.load(open("similarity_matrix.pkl", "rb"))
@@ -13,6 +17,9 @@ filename_to_index = pickle.load(open("filename_to_index.pkl", "rb"))
 index_to_filename = pickle.load(open("index_to_filename.pkl", "rb"))
 best_model = load_model("best_model.h5")
 
+# Load users dataset and interactions
+users_df = pd.read_csv("users.csv")
+interactions_df = pd.read_csv("user_song_table.csv")
 
 # @app.route('/')
 # def home():
@@ -20,12 +27,58 @@ best_model = load_model("best_model.h5")
 
 MUSIC_DIR = "categories"
 
+# Login route
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+
+        print('username :',username)
+        print('password :',password)
+        
+        # Check credentials
+        user = users_df[(users_df['name'] == username) & (users_df['password'] == password)]
+        print('user :',user)
+
+        
+        if not user.empty:
+            # Store user ID in session
+            session['user_id'] = user.iloc[0]['user_id']
+            session['username'] = username
+            flash('Login successful!', 'success')
+            return redirect(url_for('index'))
+        else:
+            flash('Invalid username or password', 'error')
+    
+    return render_template('login.html')
+
+# Logout route
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash('You have been logged out', 'success')
+    return redirect(url_for('login'))
+
 @app.route('/')
 def index():
+
     # Get the list of categories
     categories = [folder for folder in os.listdir(MUSIC_DIR) if os.path.isdir(os.path.join(MUSIC_DIR, folder))]
-    return render_template('home.html', categories=categories)
+    
+    # Get collaborative filtering recommendations for the logged-in user
+    try:
+        user_recommendations = get_user_recommendations(interactions_df, session['user_id'], top_k=10)
+    except Exception as e:
+        print(f"Error getting recommendations: {e}")
+        user_recommendations = []
+    
+    return render_template('home.html', 
+                           categories=categories, 
+                           username=session.get('username'),
+                           recommendations=user_recommendations)
 
+# Rest of the routes remain the same as in the previous implementation
 @app.route('/get_music/<category>')
 def get_music(category):
     # Get the list of music files in the selected category
