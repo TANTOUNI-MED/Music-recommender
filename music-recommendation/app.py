@@ -255,5 +255,64 @@ def recommend():
         "recommendations": recommended_filenames
     })
 
+
+@app.route('/rate_song', methods=['POST'])
+def rate_song():
+    # Ensure user is logged in
+    if 'user_id' not in session:
+        return jsonify({'success': False, 'error': 'Not logged in'}), 401
+    
+    try:
+        # Get JSON data
+        data = request.get_json()
+        song = data.get('song')
+        rating = data.get('rating')
+        
+        # Print for debugging
+        print(f"Received song: {song}")
+        
+        # Load current interactions
+        interactions_df = pd.read_csv("user_song_table.csv")
+        
+        # Find matching column with flexible matching
+        matching_columns = [col for col in interactions_df.columns if song.split('.')[0] in col and song.split('.')[-1] == col.split('.')[-1]]
+
+        if not matching_columns:
+            print(f"No matching column found for song {song}")
+            return jsonify({'success': False, 'error': f'Song {song} not found in columns'}), 404
+
+        # If multiple matches, take the first one
+        matching_column = matching_columns[0]
+        
+        # Standardize user_id handling
+        user_id = session['user_id']
+        user_id_str = f'user_{user_id}' if not str(user_id).startswith('user_') else str(user_id)
+
+        # Find user row with flexible matching
+        user_row = interactions_df[
+            (interactions_df['user_id'] == user_id_str) | 
+            (interactions_df['user_id'] == str(user_id)) |
+            (interactions_df['user_id'] == user_id)
+        ]
+        
+        if user_row.empty:
+            return jsonify({'success': False, 'error': f'User {user_id_str} not found'}), 404
+        
+        user_index = user_row.index[0]
+        
+        # Update the rating for the specific song column
+        interactions_df.at[user_index, matching_column] = float(rating)
+        
+        # Save updated interactions
+        interactions_df.to_csv("user_song_table.csv", index=False)
+        
+        return jsonify({'success': True})
+    
+    except Exception as e:
+        print(f"Error in rate_song: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 if __name__ == '__main__':
     app.run(debug=True)

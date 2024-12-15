@@ -30,49 +30,39 @@
             border-radius: 10px;
             margin-top: 20px;
         }
-                /* Main scroller container */
         .scroller {
             display: flex;
             gap: 15px;
             overflow-x: auto;
             scroll-behavior: smooth;
             padding: 10px 0;
-            scrollbar-width: thin; /* For modern browsers */
-            scrollbar-color: #ccc transparent; /* Custom scrollbar color */
+            scrollbar-width: thin;
+            scrollbar-color: #ccc transparent;
         }
-
-        /* Hide scrollbar for Webkit browsers (Chrome, Safari) */
         .scroller::-webkit-scrollbar {
             height: 8px;
         }
-
         .scroller::-webkit-scrollbar-thumb {
             background-color: #ccc;
             border-radius: 4px;
         }
-
         .scroller::-webkit-scrollbar-track {
             background: transparent;
         }
-
-        /* Music box styling */
         .music-box {
-            flex: 0 0 auto; /* Ensure elements don’t shrink or grow */
+            flex: 0 0 auto;
             cursor: pointer;
             width: 150px;
             text-align: center;
             transition: transform 0.2s ease-in-out;
         }
-
         .music-box:hover {
-            transform: scale(1.1); /* Slight zoom on hover */
+            transform: scale(1.1);
         }
-
         .music-img-box .img-box img {
             width: 100%;
             border-radius: 8px;
         }
-
         .hover-state {
             display: flex;
             align-items: center;
@@ -86,19 +76,24 @@
             opacity: 0;
             transition: opacity 0.3s ease;
         }
-
         .music-box:hover .hover-state {
             opacity: 1;
         }
-
         .icon {
             color: white;
             font-size: 24px;
         }
-
+        .star-rating .star .ti-star {
+            color: #ccc;
+            font-size: 20px;
+            cursor: pointer;
+            transition: color 0.3s ease;
+        }
+        .star-rating .star .ti-star.active {
+            color: #ffc107;
+        }
     </style>
     <script>
-        // Rest of the existing JavaScript remains the same as in the previous template
         async function loadMusic(category) {
             const response = await fetch(`/get_music/${category}`);
             const musicList = await response.json();
@@ -133,17 +128,16 @@
 
             contentDiv.innerHTML += `<div id="main-content" class="main-content">${musicHTML}</div>`;
         }
+
         async function playMusic(currentCategory, song1) {
             const parts = song1.split('.');
             const song = parts.length > 2 
                 ? `${parts[0]}.${parts[1]}.wav` 
-                : song;
+                : song1;
             console.log('Playing music:', song, 'in category:', currentCategory);
                     
-            // Extract category from the filename (assuming format: category.uniqueidentifier.wav)
             const extractedCategory = song.split('.')[0];
 
-            // Fetch recommendations
             const recommendResponse = await fetch('/recommend', {
                 method: 'POST',
                 headers: {
@@ -156,7 +150,6 @@
             });
             const recommendData = await recommendResponse.json();
 
-            // Create player HTML with a more modern, centered design
             const contentDiv = document.getElementById('content');
             const playerHTML = `
                 <div class="title">
@@ -219,6 +212,27 @@
                         "></audio>
                     </div>
                     
+                    <div class="star-rating" style="
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        margin-top: 20px;
+                        width: 100%;
+                    ">
+                        <div class="stars" data-song="${song}">
+                            ${[1,2,3,4,5].map(star => `
+                                <span class="star" data-rating="${star}">
+                                    <i class="ti-star" style="
+                                        color: #ccc;
+                                        font-size: 30px;
+                                        cursor: pointer;
+                                        transition: color 0.3s ease;
+                                    "></i>
+                                </span>
+                            `).join('')}
+                        </div>
+                    </div>
+                    
                     <div class="recommendations" style="
                         width: 100%;
                         margin-top: 20px;
@@ -268,14 +282,50 @@
                 </div>
             `;
 
-            // Update content
             contentDiv.innerHTML = playerHTML;
 
-            // Set up music player
             const musicPlayer = document.getElementById('music-player');
             musicPlayer.src = `/categories/${extractedCategory}/${song}`;
             musicPlayer.play();
-                }
+
+            // Star rating interaction
+            const starContainer = document.querySelector('.stars');
+            const stars = starContainer.querySelectorAll('.star');
+            
+            stars.forEach(star => {
+                star.addEventListener('click', async function() {
+                    const rating = this.getAttribute('data-rating');
+                    const song = starContainer.getAttribute('data-song');
+                    
+                    // Highlight stars
+                    stars.forEach(s => {
+                        const starIcon = s.querySelector('i');
+                        const currentRating = parseInt(s.getAttribute('data-rating'));
+                        starIcon.style.color = currentRating <= rating ? '#ffc107' : '#ccc';
+                    });
+
+                    console.log("rating : ",rating);
+                    
+                    // Send rating to server
+                    try {
+                        const recommendResponse = await fetch('/rate_song', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                song: song,
+                                rating: rating
+                            })
+                        });
+                        const result = await recommendResponse.json();
+                    } catch (error) {
+                        console.error('Error submitting rating:', error);
+                        alert('Failed to submit rating');
+                    }
+                });
+            });
+        }
     </script>
 </head>
 <body>
