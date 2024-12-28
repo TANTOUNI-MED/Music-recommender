@@ -6,11 +6,8 @@ import hashlib
 from flask import Flask, request, jsonify, render_template, send_from_directory, redirect, url_for, session, flash
 from keras.models import load_model
 from sklearn.metrics.pairwise import cosine_similarity
-import numpy as np
-import pandas as pd
 import tensorflow as tf
 graph = tf.compat.v1.get_default_graph()
-
 print(tf.__version__)
 
 from sklearn.preprocessing import StandardScaler
@@ -25,6 +22,41 @@ app.secret_key = 'your_secret_key_here'
 
 # Music Directory
 MUSIC_DIR = "categories"
+
+def load_playlist_data():
+    try:
+        matrix_df = pd.read_csv("playlist_user_matrix.csv", index_col=0)
+        playlists_df = pd.read_csv("playlists.csv")
+        return matrix_df, playlists_df
+    except Exception as e:
+        print(f"Error loading playlist data: {str(e)}")
+        return None, None
+
+def get_playlist_recommendations(user_id, matrix_df, playlists_df, top_n=5):
+    try:
+        if user_id not in matrix_df.columns:
+            print(f"Error: User '{user_id}' not found in the database")
+            return None
+        
+        user_ratings = matrix_df[user_id]
+        top_playlists = user_ratings.sort_values(ascending=False)[:top_n]
+        
+        recommendations = []
+        for playlist_name, score in top_playlists.items():
+            if score > 0:
+                playlist_tracks = playlists_df[playlist_name].dropna().tolist()
+                
+                recommendation = {
+                    'playlist_name': playlist_name,
+                    'score': float(score),
+                    'tracks': playlist_tracks
+                }
+                recommendations.append(recommendation)
+        
+        return recommendations
+    except Exception as e:
+        print(f"Error generating playlist recommendations: {str(e)}")
+        return None
 
 # Recommendation System Classes and Functions
 class SingleUserRecommender:
@@ -182,32 +214,52 @@ def logout():
 # Main index route
 @app.route('/')
 def index():
-    # Get the list of categories
     categories = [
         folder for folder in os.listdir(MUSIC_DIR)
         if os.path.isdir(os.path.join(MUSIC_DIR, folder))
     ]
 
-    # Initialize user recommendations as empty
     user_recommendations = []
+    playlist_recommendations = []
 
-    # Check if the user is logged in and fetch recommendations if they are
     if 'user_id' in session:
+        # Get existing song recommendations
         try:
             user_recommendations = get_user_recommendations(
                 interactions_df, session['user_id'], top_k=10
             )
         except Exception as e:
-            print(f"Error getting recommendations: {e}")
-            # `user_recommendations` remains an empty list if an error occurs
+            print(f"Error getting song recommendations: {e}")
+
+        # Get playlist recommendations
+        try:
+            matrix_df, playlists_df = load_playlist_data()
+            if matrix_df is not None and playlists_df is not None:
+                user_id = session['user_id']
+                playlist_recommendations = get_playlist_recommendations(
+                    user_id, matrix_df, playlists_df
+                )
+        except Exception as e:
+            print(f"Error getting playlist recommendations: {e}")
 
     return render_template(
         'home.html',
         categories=categories,
-        username=session.get('username'),  # Pass the username if logged in
-        recommendations=user_recommendations  # Pass recommendations if available
+        username=session.get('username'),
+        recommendations=user_recommendations,
+        playlist_recommendations=playlist_recommendations
     )
 
+@app.route('/play_playlist/<playlist_name>')
+def play_playlist(playlist_name):
+    try:
+        _, playlists_df = load_playlist_data()
+        if playlists_df is not None:
+            tracks = playlists_df[playlist_name].dropna().tolist()
+            return jsonify({'success': True, 'tracks': tracks})
+    except Exception as e:
+        print(f"Error loading playlist: {e}")
+    return jsonify({'success': False, 'error': 'Failed to load playlist'})
 
 # Get music for a specific category
 @app.route('/get_music/<category>')

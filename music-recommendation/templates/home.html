@@ -385,8 +385,70 @@
                 </div>
             </div>
             {% endif %}
+            <div class="title" style="margin-top: 60px">
+                <h2>Playlists Recommended</h2>
+            </div>
+            {% if playlist_recommendations %}
+            <div class="recommendations-section">
+                {% for playlist in playlist_recommendations %}
+                <div class="playlist-group">
+                    <h3>{{ playlist.playlist_name }} (Match Score: {{ "%.2f"|format(playlist.score) }})</h3>
+                    <div class="main-content scroller">
+                        {% for track in playlist.tracks %}
+                        <div class="music-box" onclick="playMusic(playMusic('{{ rec }}', '{{ track }}')">
+                            <div class="music-img-box">
+                                <div class="img-box">
+                                    <img src="/static/music.png" alt="{{ track }}" class="retina">
+                                </div>
+                                <div class="hover-state">
+                                    <div class="icon"><span class="ti-control-play"></span></div>
+                                </div>
+                            </div>
+                            <h4 class="title">{{ track }}</h4>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
             
         </div>
     </div>
+
+
+    <script>
+        async function playPlaylist(playlistName) {
+            try {
+                const response = await fetch(`/play_playlist/${playlistName}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const tracks = data.tracks;
+                    let currentTrackIndex = 0;
+                    
+                    const playNextTrack = () => {
+                        if (currentTrackIndex < tracks.length) {
+                            const track = tracks[currentTrackIndex];
+                            const category = track.split('.')[0];
+                            playMusic(category, track);
+                            currentTrackIndex++;
+                        }
+                    };
+                    
+                    // Play the first track
+                    playNextTrack();
+                    
+                    // Setup audio player to play next track when current one ends
+                    const audioPlayer = document.getElementById('music-player');
+                    audioPlayer.addEventListener('ended', playNextTrack);
+                } else {
+                    console.error('Failed to load playlist');
+                }
+            } catch (error) {
+                console.error('Error playing playlist:', error);
+            }
+        }
+        </script>
 </body>
 </html>
